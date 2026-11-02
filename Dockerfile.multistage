@@ -1,0 +1,79 @@
+
+# syntax=docker/dockerfile:1.7
+
+# ==========================================
+# STAGE 1: MODEL TRAINING
+# ==========================================
+
+FROM python:3.11-slim AS trainer
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-train.txt requirements-api.txt ./
+
+RUN pip install --no-cache-dir -r requirements-train.txt
+
+COPY src/ ./src/
+
+ARG EPOCHS=3
+
+RUN mkdir -p /build/artifacts
+
+# Датасет монтується лише під час навчання.
+# Він не потрапляє до фінального образу.
+
+RUN --mount=type=bind,from=dataset,source=.,target=/build/data,ro \
+    python src/train.py \
+    --data-dir /build/data \
+    --output-dir /build/artifacts \
+    --epochs ${EPOCHS} \
+    --device cpu
+
+
+# ==========================================
+# STAGE 2: PRODUCTION API
+# ==========================================
+
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-api.txt ./
+
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+COPY src/model.py src/api.py ./src/
+
+# Копіюємо лише готову модель та метрики.
+# Навчальні залежності й датасет не копіюються.
+
+COPY --from=trainer /build/artifacts ./artifacts
+
+ENV MODEL_PATH=/app/artifacts/model.pt
+ENV METRICS_PATH=/app/artifacts/metrics.json
+ENV MODEL_VERSION=1.0.0
+ENV PYTHONUNBUFFERED=1
+
+# Створюємо непривілейованого користувача
+
+RUN useradd --create-home appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" || exit 1
+
+CMD ["uvicorn", "api:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8000"]

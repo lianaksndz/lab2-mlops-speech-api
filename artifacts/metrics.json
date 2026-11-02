@@ -1,0 +1,9 @@
+{
+    "accuracy_percent": 80.9,
+    "training_time_seconds": 13.84,
+    "model_size_kb": 26.92,
+    "epochs": 3,
+    "train_samples": 12500,
+    "test_samples": 3125,
+    "device": "mps"
+}
