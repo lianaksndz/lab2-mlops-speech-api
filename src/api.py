@@ -1,3 +1,4 @@
+
 import io
 import json
 import os
@@ -6,15 +7,9 @@ from pathlib import Path
 
 import soundfile as sf
 import torch
-
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
-from model import (
-    SmallCNN,
-    CLASSES,
-    create_mel_transform,
-    prepare_audio
-)
+from model import CLASSES, SmallCNN, create_mel_transform, prepare_audio
 
 MODEL_PATH = Path(os.getenv("MODEL_PATH", "artifacts/model.pt"))
 METRICS_PATH = Path(os.getenv("METRICS_PATH", "artifacts/metrics.json"))
@@ -23,7 +18,7 @@ MODEL_VERSION = os.getenv("MODEL_VERSION", "1.0.0")
 app = FastAPI(
     title="Speech Commands ML API",
     description="API для розпізнавання голосових команд",
-    version=MODEL_VERSION
+    version=MODEL_VERSION,
 )
 
 device = torch.device("cpu")
@@ -42,7 +37,7 @@ def load_model():
     checkpoint = torch.load(
         MODEL_PATH,
         map_location=device,
-        weights_only=False
+        weights_only=False,
     )
 
     classes = checkpoint.get("classes", CLASSES)
@@ -64,7 +59,7 @@ def load_model():
 def root():
     return {
         "message": "Speech Commands ML API is running",
-        "version": MODEL_VERSION
+        "version": MODEL_VERSION,
     }
 
 
@@ -72,7 +67,7 @@ def root():
 def health():
     return {
         "status": "ok" if model is not None else "unavailable",
-        "model_loaded": model is not None
+        "model_loaded": model is not None,
     }
 
 
@@ -81,7 +76,7 @@ def model_info():
     if model is None:
         raise HTTPException(
             status_code=503,
-            detail="Модель ще не завантажена"
+            detail="Модель ще не завантажена",
         )
 
     model_size = MODEL_PATH.stat().st_size
@@ -92,22 +87,22 @@ def model_info():
         "classes": CLASSES,
         "sample_rate": 16000,
         "model_size_kb": round(model_size / 1024, 2),
-        "accuracy_percent": model_metrics.get("accuracy_percent")
+        "accuracy_percent": model_metrics.get("accuracy_percent"),
     }
 
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...)):  # noqa: B008
     if model is None:
         raise HTTPException(
             status_code=503,
-            detail="Модель недоступна"
+            detail="Модель недоступна",
         )
 
     if not file.filename or not file.filename.lower().endswith(".wav"):
         raise HTTPException(
             status_code=400,
-            detail="Потрібно завантажити WAV-файл"
+            detail="Потрібно завантажити WAV-файл",
         )
 
     contents = await file.read()
@@ -115,27 +110,24 @@ async def predict(file: UploadFile = File(...)):
     if not contents:
         raise HTTPException(
             status_code=400,
-            detail="Файл порожній"
+            detail="Файл порожній",
         )
 
     try:
         start_time = time.perf_counter()
 
-        # Читання WAV через soundfile без тимчасового файлу.
         audio, sample_rate = sf.read(
             io.BytesIO(contents),
             dtype="float32",
-            always_2d=True
+            always_2d=True,
         )
 
-        # Перетворення форми (семпли, канали)
-        # у форму (канали, семпли), яку очікує модель.
         waveform = torch.from_numpy(audio.T.copy())
 
         inputs = prepare_audio(
             waveform,
             sample_rate,
-            mel_transform
+            mel_transform,
         ).to(device)
 
         with torch.no_grad():
@@ -144,7 +136,7 @@ async def predict(file: UploadFile = File(...)):
 
         confidence, predicted_index = torch.max(
             probabilities,
-            dim=1
+            dim=1,
         )
 
         latency_ms = (
@@ -157,16 +149,16 @@ async def predict(file: UploadFile = File(...)):
             "probabilities": {
                 name: round(
                     probabilities[0][index].item(),
-                    4
+                    4,
                 )
                 for index, name in enumerate(CLASSES)
             },
             "latency_ms": round(latency_ms, 3),
-            "model_version": MODEL_VERSION
+            "model_version": MODEL_VERSION,
         }
 
     except Exception as error:
         raise HTTPException(
             status_code=400,
-            detail=f"Не вдалося обробити WAV-файл: {error}"
-        )
+            detail=f"Не вдалося обробити WAV-файл: {error}",
+        ) from error

@@ -7,17 +7,11 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import torch
-import torch.nn as nn
 import torchaudio
-from torch.utils.data import Dataset, DataLoader
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
 
-from model import (
-    SmallCNN,
-    CLASSES,
-    SAMPLE_RATE,
-    NUM_SAMPLES,
-    create_mel_transform
-)
+from model import CLASSES, NUM_SAMPLES, SAMPLE_RATE, SmallCNN, create_mel_transform
 
 
 class SpeechCommandsDataset(Dataset):

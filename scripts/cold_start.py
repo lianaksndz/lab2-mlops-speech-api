@@ -1,8 +1,9 @@
+
+import json
 import subprocess
+import sys
 import time
 import urllib.request
-import json
-import sys
 
 
 def measure(container, url):
@@ -12,19 +13,22 @@ def measure(container, url):
         ["docker", "start", container],
         check=True,
         capture_output=True,
-        text=True
+        text=True,
     )
 
     while True:
         try:
             with urllib.request.urlopen(url, timeout=1) as response:
                 result = json.loads(response.read().decode())
+
                 if response.status == 200 and result.get("status") == "ok":
                     break
-        except Exception:
+
+        except Exception:  # noqa: BLE001
             time.sleep(0.1)
 
     elapsed = (time.perf_counter() - start) * 1000
+
     print(f"Container: {container}")
     print(f"Cold Start: {elapsed:.2f} ms")
 

@@ -1,7 +1,6 @@
 import torch
-import torch.nn as nn
 import torchaudio
-
+from torch import nn
 
 SAMPLE_RATE = 16000
 NUM_SAMPLES = 16000

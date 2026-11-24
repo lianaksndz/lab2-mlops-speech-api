@@ -27,7 +27,7 @@ ARG EPOCHS=3
 
 RUN mkdir -p /app/artifacts
 
-# Навчання моделі всередині цього ж образу
+
 
 RUN --mount=type=bind,from=dataset,source=.,target=/app/data,ro \
     python src/train.py \

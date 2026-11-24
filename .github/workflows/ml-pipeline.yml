@@ -1,0 +1,191 @@
+
+name: ML CI-CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: Number of training epochs
+        required: true
+        default: "3"
+        type: string
+      push_image:
+        description: Publish Docker image
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PYTHON_VERSION: "3.11"
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  lint:
+    name: Lint and Syntax Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff
+        run: ruff check src scripts tests
+
+      - name: Check Python syntax
+        run: python -m compileall -q src scripts tests
+
+  train:
+    name: Train ML Model
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download dataset
+        run: python scripts/download_data.py --data-dir data
+
+      - name: Build trainer image
+        run: docker build -f Dockerfile.multistage --target trainer -t ml-trainer .
+
+      - name: Train model
+        run: |
+          mkdir -p artifacts
+          docker run --rm \
+            -v "$PWD/data:/data:ro" \
+            -v "$PWD/artifacts:/artifacts" \
+            ml-trainer \
+            --data-dir /data \
+            --output-dir /artifacts \
+            --epochs ${{ github.event.inputs.epochs || 3 }} \
+            --seed 42 \
+            --device cpu
+
+      - name: Upload trained model
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: |
+            artifacts/model.pt
+            artifacts/metrics.json
+            artifacts/labels.json
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Verify API and Model
+    runs-on: ubuntu-latest
+    needs: train
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download trained model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: artifacts
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install benchmark dependencies
+        run: pip install requests
+
+      - name: Build runtime image
+        run: docker build -f Dockerfile.multistage --target runtime -t ml-api .
+
+      - name: Start API
+        run: |
+          docker run -d \
+            --name ml-api \
+            -p 8000:8000 \
+            ml-api
+
+      - name: Wait for API
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health; then
+              echo "API is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ml-api
+          exit 1
+
+      - name: Verify model
+        run: python scripts/verify_model.py
+
+      - name: Benchmark model
+        run: python scripts/benchmark.py http://localhost:8000/predict samples/test_yes.wav
+
+      - name: Show model metrics
+        run: cat artifacts/metrics.json
+
+      - name: Stop API
+        if: always()
+        run: docker rm -f ml-api || true
+
+  build-push:
+    name: Build and Publish Docker Image
+    runs-on: ubuntu-latest
+    needs: verify
+
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.push_image == true)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download trained model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: artifacts
+
+      - name: Log in to GitHub Container Registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
+            -u "${{ github.actor }}" --password-stdin
+
+      - name: Build runtime image
+        run: docker build -f Dockerfile.multistage --target runtime -t $IMAGE_NAME:${{ github.sha }} .
+
+      - name: Tag latest
+        if: github.ref == 'refs/heads/main'
+        run: docker tag $IMAGE_NAME:${{ github.sha }} $IMAGE_NAME:latest
+
+      - name: Push image
+        run: |
+          docker push $IMAGE_NAME:${{ github.sha }}
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            docker push $IMAGE_NAME:latest
+          fi

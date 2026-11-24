@@ -1,8 +1,8 @@
+import json
+import statistics
 import sys
 import time
-import json
 import urllib.request
-import statistics
 import uuid
 from pathlib import Path
 
