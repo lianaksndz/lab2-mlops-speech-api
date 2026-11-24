@@ -4,7 +4,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-URL = "https://download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
+URL = "https://storage.googleapis.com/download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
 
 CLASSES = ["yes", "no", "up", "down"]
 
@@ -27,7 +27,7 @@ def download_dataset(data_dir: Path):
             members = [
                 member
                 for member in all_members
-                if member.name.startswith(f"{class_name}/")
+                if member.name.removeprefix("./").startswith(f"{class_name}/")
                 and member.name.endswith(".wav")
             ]
 
