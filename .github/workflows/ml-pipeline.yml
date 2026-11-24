@@ -139,12 +139,13 @@ jobs:
           docker logs ml-api
           exit 1
 
-      - name: Verify model
+              - name: Verify model
+        env:
+          API_URL: http://localhost:8000/predict
         run: python scripts/verify_model.py
 
       - name: Benchmark model
         run: python scripts/benchmark.py http://localhost:8000/predict samples/test_yes.wav
-
       - name: Show model metrics
         run: cat artifacts/metrics.json
 
